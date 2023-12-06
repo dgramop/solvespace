@@ -716,8 +716,9 @@ ExprParser::Token ExprParser::Lex(std::string *error) {
     Token t = Token::From();
     char c = PeekChar();
     if(isupper(c)) {
-        std::string n = ReadWord();
-        t = Token::From(TokenType::OPERAND, Expr::Op::VARIABLE);
+        //std::string n = ReadWord();
+        //t = Token::From(TokenType::OPERAND, Expr::Op::VARIABLE);
+				*error = "Variables are not yet supported. Please remove the character";
     } else if(isalpha(c)) {
         std::string s = ReadWord();
         if(s == "sqrt") {
