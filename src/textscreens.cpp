@@ -352,6 +352,7 @@ void TextWindow::ShowGroupInfo() {
         Printf(true, "%FtGROUP  %E%s", g->DescriptionString().c_str());
         goto list_items;
     } else {
+        
         Printf(true, "%FtGROUP  %E%s [%Fl%Ll%D%frename%E/%Fl%Ll%D%fdel%E]",
             g->DescriptionString().c_str(),
             g->h.v, &TextWindow::ScreenChangeGroupName,
@@ -543,6 +544,26 @@ list_items:
                    &(TextWindow::ScreenHoverRequest),
                    s.c_str());
             a++;
+        }
+    }
+    if(a == 0) Printf(false, "%Ba   (none)");
+
+    a = 0;
+    Printf(false, "");
+    Printf(false, "%Ft named parameters in group");
+    IdList<Param,hParam> param = {};
+    for(Constraint &c : SK.constraint) {
+        c.Generate(&param);
+    }
+    for(Param &p : param) {
+        if(!p.name.empty()) {
+            a++;
+            Printf(false, "%Bp   [%s] Inherited: %f%Ld%s", 
+               (a & 1) ? 'd' : 'a',
+               p.name.c_str(),
+               &TextWindow::ScreenChangeGroupOption,
+               p.inherit ? CHECK_TRUE : CHECK_FALSE
+               );
         }
     }
     if(a == 0) Printf(false, "%Ba   (none)");

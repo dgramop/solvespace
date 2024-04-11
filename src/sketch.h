@@ -618,6 +618,14 @@ public:
     int         tag;
     hParam      h;
 
+    // marks this parameter as an input parameter
+    // if this is an input variable, 
+    // the parameter will find the most recent group with a non-inherited parameter by the same name
+    // 
+    // If it hits the root group, then we should create a variable name 
+    // TODO: what happens for linking?
+    bool inherit;
+
     double      val;
     bool        known;
     bool        free;
