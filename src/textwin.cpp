@@ -384,6 +384,7 @@ void TextWindow::Printf(bool halfLine, const char *fmt, ...) {
     RgbaColor bgRgb = RGBi(0, 0, 0);
     int link = NOT_A_LINK;
     uint32_t data = 0;
+    void* ptr = nullptr;
     LinkFunction *f = NULL, *h = NULL;
 
     c = 0;

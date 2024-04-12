@@ -92,6 +92,9 @@ public:
 template<>
 struct IsHandleOracle<hEntity> : std::true_type {};
 
+// invariant: in the textwindow, we rely on the fact that 
+// this is a 32 bit wide struct, since it's passed through 
+// a uint32_t to a handler function
 class hParam {
 public:
     // bits 15: 0   -- param index

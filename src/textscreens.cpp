@@ -273,6 +273,16 @@ void TextWindow::ScreenChangeGroupOption(int link, uint32_t v) {
     SS.GW.ClearSuper();
 }
 
+void TextWindow::ScreenParameterInheritanceToggle(int link, uint32_t v) {
+    hParam hp =  { v };
+    Param *p = SK.GetParam(hp);
+    p->inherit = !p->inherit;
+    Group *g = SK.GetGroup(SS.TW.shown.group);
+    dbp("name: %s, inherit: %d", p->name.c_str(), p->inherit);
+    //SS.MarkGroupDirty(g->h); calling these seems to make it reset the inherit state, probably because it's not being correctly copied since I just added the field
+    //SS.GW.ClearSuper();
+}
+
 void TextWindow::ScreenColor(int link, uint32_t v) {
     SS.UndoRemember();
 
@@ -558,10 +568,12 @@ list_items:
     for(Param &p : param) {
         if(!p.name.empty()) {
             a++;
-            Printf(false, "%Bp   [%s] Inherited: %f%Ld%s", 
+            auto name = p.name.c_str();
+            Printf(false, "%Bp   [%s] Inherited: %f%D%Ld%s", 
                (a & 1) ? 'd' : 'a',
                p.name.c_str(),
-               &TextWindow::ScreenChangeGroupOption,
+               &TextWindow::ScreenParameterInheritanceToggle, //[](int link, uint32_t paramptr) { dbp("toggled: "); }, 
+               p.h,
                p.inherit ? CHECK_TRUE : CHECK_FALSE
                );
         }
