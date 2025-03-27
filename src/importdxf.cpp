@@ -154,7 +154,6 @@ public:
 
     bool asConstruction = false;
     unsigned unknownEntities = 0;
-    std::map<std::string, hStyle> styles;
     std::map<std::string, Block> blocks;
     std::map<std::string, DRW_Layer> layers;
     Block *readBlock = NULL;
@@ -336,111 +335,9 @@ public:
         return result;
     }
 
-    hStyle invisibleStyle() {
-        std::string id = "@dxf-invisible";
-
-        auto si = styles.find(id);
-        if(si != styles.end()) {
-            return si->second;
-        }
-
-        hStyle hs = { Style::CreateCustomStyle(/*rememberForUndo=*/false) };
-        Style *s = Style::Get(hs);
-        s->name = id;
-        s->visible = false;
-
-        styles.emplace(id, hs);
-        return hs;
-    }
-
-    hStyle styleFor(const DRW_Entity *e) {
-        // Color.
-        //! @todo which color to choose: index or RGB one?
-        int col = getColor(e);
-        RgbaColor c = RgbaColor::From(DRW::dxfColors[col][0],
-                                      DRW::dxfColors[col][1],
-                                      DRW::dxfColors[col][2]);
-
-        // Line width.
-        DRW_LW_Conv::lineWidth lw = getLineWidth(e);
-        double width = DRW_LW_Conv::lineWidth2dxfInt(e->lWeight) / 100.0;
-        if(width < 0.0) width = 1.0;
-
-        // Line stipple.
-        //! @todo Probably, we can load default autocad patterns and match it with ours.
-        std::string lineType = getLineType(e);
-        StipplePattern stipple = StipplePattern::CONTINUOUS;
-        for(uint32_t i = 0; i <= (uint32_t)StipplePattern::LAST; i++) {
-            StipplePattern st = (StipplePattern)i;
-            if(lineType == DxfFileWriter::lineTypeName(st)) {
-                stipple = st;
-                break;
-            }
-        }
-
-        // Text properties.
-        DRW_Text::HAlign alignH = DRW_Text::HLeft;
-        DRW_Text::VAlign alignV = DRW_Text::VBaseLine;
-        double textAngle = 0.0;
-        double textHeight = Style::DefaultTextHeight();
-
-        if(e->eType == DRW::TEXT || e->eType == DRW::MTEXT) {
-            const DRW_Text *text = static_cast<const DRW_Text *>(e);
-            alignH = text->alignH;
-            alignV = text->alignV;
-            textHeight = text->height;
-            textAngle = text->angle;
-            // I have no idea why, but works
-            if(alignH == DRW_Text::HMiddle) {
-                alignV = DRW_Text::VMiddle;
-            }
-        }
-
-        // Unique identifier based on style properties.
-        std::string id = "@dxf";
-        if(lw != DRW_LW_Conv::widthDefault)
-            id += ssprintf("-w%.4g", width);
-        if(lineType != "CONTINUOUS")
-            id += ssprintf("-%s", lineType.c_str());
-        if(c.red != 0 || c.green != 0 || c.blue != 0)
-            id += ssprintf("-#%02x%02x%02x", c.red, c.green, c.blue);
-        if(textHeight != Style::DefaultTextHeight())
-            id += ssprintf("-h%.4g", textHeight);
-        if(textAngle != 0.0)
-            id += ssprintf("-a%.5g", textAngle);
-        if(alignH != DRW_Text::HLeft)
-            id += ssprintf("-oh%d", alignH);
-        if(alignV != DRW_Text::VBaseLine)
-            id += ssprintf("-ov%d", alignV);
-
-        auto si = styles.find(id);
-        if(si != styles.end()) {
-            return si->second;
-        }
-
-        hStyle hs = { Style::CreateCustomStyle(/*rememberForUndo=*/false) };
-        Style *s = Style::Get(hs);
-        if(lw != DRW_LW_Conv::widthDefault) {
-            s->widthAs = Style::UnitsAs::MM;
-            s->width = width;
-            s->stippleScale = 1.0 + width * 2.0;
-        }
-        s->name = id;
-        s->stippleType = stipple;
-        if(c.red != 0 || c.green != 0 || c.blue != 0) s->color = c;
-        s->textHeightAs = Style::UnitsAs::MM;
-        s->textHeight = textHeight;
-        s->textAngle = textAngle;
-        s->textOrigin = dxfAlignToOrigin(alignH, alignV);
-
-        styles.emplace(id, hs);
-        return hs;
-    }
-
-    void configureRequest(hRequest hr, hStyle hs) {
+    void configureRequest(hRequest hr) {
         Request *r = SK.GetRequest(hr);
         r->construction = asConstruction;
-        r->style = hs;
     }
 
     struct VectorHash {
@@ -499,7 +396,7 @@ public:
         return he;
     }
 
-    hEntity createLine(Vector p0, Vector p1, hStyle style, bool constrainHV = false) {
+    hEntity createLine(Vector p0, Vector p1, bool constrainHV = false) {
         if(p0.Equals(p1)) return Entity::NO_ENTITY;
         hRequest hr = SS.GW.AddRequest(Request::Type::LINE_SEGMENT, /*rememberForUndo=*/false);
         SK.GetEntity(hr.entity(1))->PointForceTo(p0);
@@ -527,7 +424,7 @@ public:
             }
         }
 
-        configureRequest(hr, style);
+        configureRequest(hr);
         return hr.entity(0);
     }
 
@@ -560,13 +457,13 @@ public:
         g->activeWorkplane = he;
     }
 
-    hEntity createCircle(const Vector &c, const Quaternion &q, double r, hStyle style) {
+    hEntity createCircle(const Vector &c, const Quaternion &q, double r) {
         hRequest hr = SS.GW.AddRequest(Request::Type::CIRCLE, /*rememberForUndo=*/false);
         SK.GetEntity(hr.entity(1))->PointForceTo(c);
         processPoint(hr.entity(1));
         SK.GetEntity(hr.entity(32))->NormalForceTo(q);
         SK.GetEntity(hr.entity(64))->DistanceForceTo(r);
-        configureRequest(hr, style);
+        configureRequest(hr);
         return hr.entity(0);
     }
 
@@ -596,7 +493,7 @@ public:
         if(data.space != DRW::ModelSpace) return;
         if(addPendingBlockEntity<DRW_Line>(data)) return;
 
-        createLine(toVector(data.basePoint), toVector(data.secPoint), styleFor(&data),
+        createLine(toVector(data.basePoint), toVector(data.secPoint),
                    /*constrainHV=*/true);
     }
 
@@ -639,7 +536,7 @@ public:
         processPoint(hr.entity(1));
         processPoint(hr.entity(2));
         processPoint(hr.entity(3));
-        configureRequest(hr, styleFor(&data));
+        configureRequest(hr);
         activateWorkplane(oldWorkplane);
     }
 
@@ -649,7 +546,7 @@ public:
 
         Vector nz = toVector(data.extPoint);
         Quaternion normal = NormalFromExtPoint(nz);
-        createCircle(toVector(data.basePoint), normal, data.radious, styleFor(&data));
+        createCircle(toVector(data.basePoint), normal, data.radious);
     }
 
     void addLWPolyline(const DRW_LWPolyline &data)  override {
@@ -677,13 +574,12 @@ public:
 
             Vector p0 = Vector::From(c0.x, c0.y, 0.0);
             Vector p1 = Vector::From(c1.x, c1.y, 0.0);
-            hStyle hs = styleFor(&data);
 
             if(EXACT(data.vertlist[i]->bulge == 0.0)) {
-                createLine(blockTransform(p0), blockTransform(p1), hs, /*constrainHV=*/true);
+                createLine(blockTransform(p0), blockTransform(p1), /*constrainHV=*/true);
             } else {
                 hRequest hr = createBulge(p0, p1, c0.bulge);
-                configureRequest(hr, hs);
+                configureRequest(hr);
             }
         }
     }
@@ -714,13 +610,12 @@ public:
 
             Vector p0 = Vector::From(c0.x, c0.y, c0.z);
             Vector p1 = Vector::From(c1.x, c1.y, c1.z);
-            hStyle hs = styleFor(&data);
 
             if(EXACT(bulge == 0.0)) {
-                createLine(blockTransform(p0), blockTransform(p1), hs, /*constrainHV=*/true);
+                createLine(blockTransform(p0), blockTransform(p1), /*constrainHV=*/true);
             } else {
                 hRequest hr = createBulge(p0, p1, bulge);
-                configureRequest(hr, hs);
+                configureRequest(hr);
             }
         }
     }
@@ -735,7 +630,7 @@ public:
             SK.GetEntity(hr.entity(i + 1))->PointForceTo(toVector(*data->controllist[i]));
             processPoint(hr.entity(i + 1));
         }
-        configureRequest(hr, styleFor(data));
+        configureRequest(hr);
     }
 
     void addInsert(const DRW_Insert &data) override {
@@ -792,7 +687,6 @@ public:
             c.disp.offset   = toVector(data.secPoint);
         }
         c.comment       = data.text;
-        c.disp.style    = styleFor(&data);
         Constraint::AddConstraint(&c, /*rememberForUndo=*/false);
     }
 
@@ -846,7 +740,7 @@ public:
             Constraint::Type::PT_LINE_DISTANCE,
             createOrGetPoint(p0),
             Entity::NO_ENTITY,
-            createLine(p1, p3, invisibleStyle())
+            createLine(p1, p3)
         );
 
         Constraint *c = SK.GetConstraint(hc);
@@ -871,8 +765,8 @@ public:
             Constraint::Type::ANGLE,
             Entity::NO_ENTITY,
             Entity::NO_ENTITY,
-            createLine(l0p0, l0p1, invisibleStyle()),
-            createLine(l1p1, l1p0, invisibleStyle()),
+            createLine(l0p0, l0p1),
+            createLine(l1p1, l1p0),
             /*other=*/false,
             /*other2=*/false
         );
@@ -896,7 +790,7 @@ public:
 
     hConstraint createDiametric(Vector cp, Quaternion q, double r, Vector tp,
                                 double actual, bool asRadius = false) {
-        hEntity he = createCircle(cp, q, r, invisibleStyle());
+        hEntity he = createCircle(cp, q, r);
 
         hConstraint hc = Constraint::Constrain(
             Constraint::Type::DIAMETER,
