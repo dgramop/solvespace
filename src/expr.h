@@ -37,12 +37,12 @@ public:
     };
 
     Op      op;
-    Expr    *a;
+    Expr    *a; //nullptr if this is a PARAM, PARAM_PTR, CONSTANT, VARIABLE
     union {
-        double  v;
+        double  v; // this variant if CONSTANT
         hParam  parh;
-        Param  *parp;
-        Expr    *b;
+        Param  *parp; 
+        Expr    *b; // nullptr if this is a unary op, 
     };
 
     Expr() = default;
@@ -98,7 +98,8 @@ public:
                                        IdList<Param,hParam> *thenTry) const;
 
     static Expr *Parse(const std::string &input, std::string *error);
-    static Expr *From(const std::string &input, bool popUpError);
+    static Expr *From(const std::string &input, bool popUpError,
+        IdList<Param, hParam> *params = NULL, int *paramsCount = NULL, hConstraint hc = {0});
 };
 
 class ExprVector {

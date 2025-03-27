@@ -615,6 +615,17 @@ list_items:
         }
     }
     if(a == 0) Printf(false, "%Ba   (none)");
+
+    a = 0;
+    Printf(false, "");
+    Printf(false, "%Ft named parameters");
+    for(Param &id : SK.param) {
+        if(!id.name.empty()) {
+            Printf(false, "    %s: %#", id.name.c_str(), id.val);
+            a++;
+        }
+    }
+    if(a == 0) Printf(false, "%Ba   (none)");
 }
 
 //-----------------------------------------------------------------------------
@@ -939,7 +950,7 @@ void TextWindow::EditControlDone(std::string s) {
         case Edit::STEP_DIM_FINISH:
             if(Expr *e = Expr::From(s, /*popUpError=*/true)) {
                 if(stepDim.isDistance) {
-                    stepDim.finish = SS.ExprToMm(e);
+                    stepDim.finish = SS.NonConstraintExprToMm(e);
                 } else {
                     stepDim.finish = e->Eval();
                 }
@@ -956,7 +967,7 @@ void TextWindow::EditControlDone(std::string s) {
                     Error(_("Radius cannot be zero or negative."));
                     break;
                 }
-                SS.tangentArcRadius = SS.ExprToMm(e);
+                SS.tangentArcRadius = SS.NonConstraintExprToMm(e);
             }
             break;
 

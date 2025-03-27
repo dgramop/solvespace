@@ -621,6 +621,9 @@ public:
 
     std::string::const_iterator it, end;
     std::vector<Token> stack;
+    std::set<uint32_t> newParams;
+    IdList<Param, hParam> *params;
+    hConstraint hc;
 
     char ReadChar();
     char PeekChar();
@@ -637,7 +640,8 @@ public:
     bool Reduce(std::string *error);
     bool Parse(std::string *error, size_t reduceUntil = 0);
 
-    static Expr *Parse(const std::string &input, std::string *error);
+    static Expr *Parse(const std::string &input, std::string *error, IdList<Param,
+                        hParam> *params = NULL, int *paramsCount = 0, hConstraint hc = {0});
 };
 
 ExprParser::Token ExprParser::Token::From(TokenType type, Expr *expr) {
@@ -671,7 +675,7 @@ std::string ExprParser::ReadWord() {
     std::string s;
 
     while(char c = PeekChar()) {
-        if(!isalnum(c)) break;
+        if(!isalnum(c) && c != '_') break;
         s.push_back(ReadChar());
     }
 
@@ -735,6 +739,30 @@ ExprParser::Token ExprParser::Lex(std::string *error) {
         } else if(s == "pi") {
             t = Token::From(TokenType::OPERAND, Expr::Op::CONSTANT);
             t.expr->v = PI;
+        } else if(params != NULL) {
+            bool found = false;
+            for(const Param &p : *params) {
+                if(p.name != s) continue;
+                t = Token::From(TokenType::OPERAND, Expr::Op::PARAM);
+                t.expr->parh = p.h;
+                newParams.insert(p.h.v);
+                found = true;
+            }
+            if(!found) {
+                Param p = {};
+                int count = 0;
+
+                while(params->FindByIdNoOops(hc.param(count)) != NULL) {
+                    count++;
+                }
+
+                p.h = hc.param(count);
+                p.name = s;
+                params->Add(&p);
+                newParams.insert(p.h.v);
+                t = Token::From(TokenType::OPERAND, Expr::Op::PARAM);
+                t.expr->parh = p.h;
+            }
         } else {
             *error = "'" + s + "' is not a valid variable, function or constant";
         }
@@ -768,7 +796,12 @@ ExprParser::Token ExprParser::Lex(std::string *error) {
 
 ExprParser::Token ExprParser::PopOperand(std::string *error) {
     Token t = Token::From();
-    if(stack.empty() || stack.back().type != TokenType::OPERAND) {
+    if(stack.empty() 
+            || ( 
+                stack.back().type != TokenType::OPERAND
+                && (stack.back().expr == nullptr)
+               )
+            ) {
         *error = "Expected an operand";
     } else {
         t = stack.back();
@@ -810,17 +843,31 @@ int ExprParser::Precedence(Token t) {
 
 bool ExprParser::Reduce(std::string *error) {
     Token a = PopOperand(error);
+    if((error != NULL) && (!error->empty())) return false;
     if(a.IsError()) return false;
 
     Token op = PopOperator(error);
+
+    // support for multiplicaiton shorthand (i.e. 2x instead of 2*x)
+    if(op.IsError()) {
+        op = Token::From(TokenType::BINARY_OP, Expr::Op::TIMES);
+        error = NULL;
+    } 
+    //redundant in current setup, since if there's an error op is likely to be null. keeping to preseve error handing in future changes
+    else if((error != NULL) && (!error->empty())) return false; 
+
     if(op.IsError()) return false;
 
-    Token r = Token::From(TokenType::OPERAND);
     switch(op.type) {
         case TokenType::BINARY_OP: {
             Token b = PopOperand(error);
+            if((error != NULL) && (!error->empty())) return false;
             if(b.IsError()) return false;
-            r.expr = b.expr->AnyOp(op.expr->op, a.expr);
+
+            // gives the operand children:
+            // semantically this subtree represents an operand, so we change the token type accordingly
+            op.expr = b.expr->AnyOp(op.expr->op, a.expr);
+            stack.push_back(op);
             break;
         }
 
@@ -836,13 +883,13 @@ bool ExprParser::Reduce(std::string *error) {
                 case Expr::Op::ACOS:   e = e->ACos()->Times(Expr::From(180/PI)); break;
                 default: ssassert(false, "Unexpected unary operator");
             }
-            r.expr = e;
+            op.expr = e;
+            stack.push_back(op);
             break;
         }
 
         default: ssassert(false, "Unexpected operator");
     }
-    stack.push_back(r);
 
     return true;
 }
@@ -906,14 +953,19 @@ bool ExprParser::Parse(std::string *error, size_t reduceUntil) {
     return true;
 }
 
-Expr *ExprParser::Parse(const std::string &input, std::string *error) {
+Expr *ExprParser::Parse(const std::string &input, std::string *error,
+                        IdList<Param, hParam> *params, int *paramsCount, hConstraint hc) {
     ExprParser parser;
     parser.it  = input.cbegin();
     parser.end = input.cend();
+    parser.params = params;
+    parser.newParams.clear();
+    parser.hc = hc;
     if(!parser.Parse(error)) return NULL;
 
     Token r = parser.PopOperand(error);
     if(r.IsError()) return NULL;
+    if(paramsCount != NULL) *paramsCount = parser.newParams.size();
     return r.expr;
 }
 
@@ -921,9 +973,10 @@ Expr *Expr::Parse(const std::string &input, std::string *error) {
     return ExprParser::Parse(input, error);
 }
 
-Expr *Expr::From(const std::string &input, bool popUpError) {
+Expr *Expr::From(const std::string &input, bool popUpError,
+                        IdList<Param, hParam> *params, int *paramsCount, hConstraint hc) {
     std::string error;
-    Expr *e = ExprParser::Parse(input, &error);
+    Expr *e = ExprParser::Parse(input, &error, params, paramsCount, hc);
     if(!e) {
         dbp("Parse/lex error: %s", error.c_str());
         if(popUpError) {

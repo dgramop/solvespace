@@ -122,6 +122,7 @@ const SolveSpaceUI::SaveTable SolveSpaceUI::SAVED[] = {
 
     { 'p',  "Param.h.v.",               'x',    &(SS.sv.p.h.v)                },
     { 'p',  "Param.val",                'f',    &(SS.sv.p.val)                },
+    { 'p',  "Param.name",               'S',    &(SS.sv.p.name)                },
 
     { 'r',  "Request.h.v",              'x',    &(SS.sv.r.h.v)                },
     { 'r',  "Request.type",             'd',    &(SS.sv.r.type)               },
@@ -185,6 +186,8 @@ const SolveSpaceUI::SaveTable SolveSpaceUI::SAVED[] = {
     { 'c',  "Constraint.other2",        'b',    &(SS.sv.c.other2)             },
     { 'c',  "Constraint.reference",     'b',    &(SS.sv.c.reference)          },
     { 'c',  "Constraint.comment",       'S',    &(SS.sv.c.comment)            },
+    { 'c',  "Constraint.expression",    'S',    &(SS.sv.c.expression)         },
+    { 'c',  "Constraint.expr_scaling_to_base",    'f',    &(SS.sv.c.expr_scaling_to_base)         },
     { 'c',  "Constraint.disp.offset.x", 'f',    &(SS.sv.c.disp.offset.x)      },
     { 'c',  "Constraint.disp.offset.y", 'f',    &(SS.sv.c.disp.offset.y)      },
     { 'c',  "Constraint.disp.offset.z", 'f',    &(SS.sv.c.disp.offset.z)      },

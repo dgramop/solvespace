@@ -25,6 +25,7 @@ bool ConstraintBase::HasLabel() const {
         case Type::ARC_LINE_DIFFERENCE:
         case Type::ANGLE:
         case Type::COMMENT:
+        case Type::RELATION:
             return true;
 
         default:
@@ -60,6 +61,7 @@ bool ConstraintBase::IsProjectible() const {
         case Type::PERPENDICULAR:
         case Type::WHERE_DRAGGED:
         case Type::COMMENT:
+        case Type::RELATION:
             return true;
 
         case Type::PT_PLANE_DISTANCE:
@@ -248,6 +250,18 @@ void ConstraintBase::AddEq(IdList<Equation,hEquation> *l, const ExprVector &v,
 }
 
 void ConstraintBase::Generate(IdList<Param,hParam> *l) {
+    // apparently necessary to get params used into l, though we just have to "parse" everything, regardless of whether we use it or not.
+    if(type == Constraint::Type::RELATION) {
+        size_t eqpos = expression.find_first_of("=");
+        ssassert(eqpos == expression.find_last_of("="), "There is at most one equals sign in the relation \"expression\"");
+        ssassert(eqpos != std::string::npos, "There is at least one equals sign in the relation \"expression\"");
+        Expr::From(expression.substr(0, eqpos), false, l, NULL)->Minus(Expr::From(expression.substr(eqpos+1, SIZE_MAX), false, l, NULL));
+    } else if(expression != "" && expr_scaling_to_base != 0) {
+        Expr::From(expression.c_str(), false, l, NULL)->Times(Expr::From(std::to_string(expr_scaling_to_base).c_str(), false, l, NULL));
+    } else if(expression != "") {
+        Expr::From(expression.c_str(), false, l);
+    }
+
     switch(type) {
         case Type::PARALLEL:
         case Type::CUBIC_LINE_TANGENT:
@@ -270,9 +284,22 @@ void ConstraintBase::Generate(IdList<Param,hParam> *l) {
 
 void ConstraintBase::GenerateEquations(IdList<Equation,hEquation> *l,
                                        bool forReference) const {
-    if(reference && !forReference) return;
+    Expr *exA = {};
+    if(reference && !forReference) {
+        return;
+    } else {
+        if(type == Constraint::Type::RELATION) {
+            size_t eqpos = expression.find_first_of("=");
+            exA = Expr::From(expression.substr(0, eqpos), false, &SK.param, NULL)->Minus(Expr::From(expression.substr(eqpos+1, SIZE_MAX), false, &SK.param, NULL));
+        } else if(expression != "" && expr_scaling_to_base != 0) {
+            exA = Expr::From(expression.c_str(), false, &SK.param, NULL)->Times(Expr::From(std::to_string(expr_scaling_to_base).c_str(), false, &SK.param, NULL));
+        } else if(expression != "") {
+            exA = Expr::From(expression.c_str(), false, &SK.param, NULL);
+        } else {
+            exA = Expr::From(valA);
+        }
+    }
 
-    Expr *exA = Expr::From(valA);
     switch(type) {
         case Type::PT_PT_DISTANCE:
             AddEq(l, Distance(workplane, ptA, ptB)->Minus(exA), 0);
@@ -1053,6 +1080,11 @@ void ConstraintBase::GenerateEquations(IdList<Equation,hEquation> *l,
 
         case Type::COMMENT:
             return;
+
+        case Type::RELATION:
+            AddEq(l, exA, 0); 
+            return;
+
     }
     ssassert(false, "Unexpected constraint ID");
 }

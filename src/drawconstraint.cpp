@@ -26,6 +26,12 @@ std::string Constraint::Label() const {
         // valA has units of distance
         result = SS.MmToStringSI(fabs(valA));
     }
+    if(expression != "") {
+        result = expression;
+        if((SS.MmPerUnit() != expr_scaling_to_base) && (expr_scaling_to_base != 0)) {
+            result = "("+result+")" + "*" + std::to_string(expr_scaling_to_base/SS.MmPerUnit());
+        }
+    }
     if(reference) {
         result += " REF";
     }
@@ -60,7 +66,7 @@ void Constraint::DoLabel(Canvas *canvas, Canvas::hStroke hcs,
     // By default, the reference is from the center; but the style could
     // specify otherwise if one is present, and it could also specify a
     // rotation.
-    if(type == Type::COMMENT && disp.style.v) {
+    if(((type == Type::COMMENT) || (type == Type::RELATION)) && disp.style.v) {
         Style *st = Style::Get(disp.style);
         // rotation first
         double rads = st->textAngle*PI/180;
@@ -1287,6 +1293,7 @@ s:
             }
             return;
 
+        case Type::RELATION: 
         case Type::COMMENT: {
             Vector u, v;
             if(workplane == Entity::FREE_IN_3D) {
@@ -1343,7 +1350,7 @@ void Constraint::GetReferencePoints(const Camera &camera, std::vector<Vector> *r
 }
 
 bool Constraint::IsStylable() const {
-    if(type == Type::COMMENT) return true;
+    if((type == Type::COMMENT) || (type == Type::RELATION)) return true;
     return false;
 }
 
@@ -1355,6 +1362,7 @@ hStyle Constraint::GetStyle() const {
 bool Constraint::HasLabel() const {
     switch(type) {
         case Type::COMMENT:
+        case Type::RELATION:
         case Type::PT_PT_DISTANCE:
         case Type::PT_PLANE_DISTANCE:
         case Type::PT_LINE_DISTANCE:

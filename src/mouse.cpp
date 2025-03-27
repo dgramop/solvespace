@@ -4,6 +4,7 @@
 // Copyright 2008-2013 Jonathan Westhues.
 //-----------------------------------------------------------------------------
 #include "solvespace.h"
+#include "ui.h"
 
 void GraphicsWindow::UpdateDraggedPoint(hEntity hp, double mx, double my) {
     Entity *p = SK.GetEntity(hp);
@@ -1161,6 +1162,18 @@ void GraphicsWindow::MouseLeftDown(double mx, double my, bool shiftDown, bool ct
                     hc = Constraint::AddConstraint(&c);
                     break;
                 }
+
+                case Command::RELATION: {
+                    ClearSuper();
+                    Constraint c = {};
+                    c.group       = SS.GW.activeGroup;
+                    c.workplane   = SS.GW.ActiveWorkplane();
+                    c.type        = Constraint::Type::RELATION;
+                    c.disp.offset = v;
+                    c.expression  = _("x=5");
+                    hc = Constraint::AddConstraint(&c);
+                    break;
+                }
                 default: ssassert(false, "Unexpected pending menu id");
             }
             break;
@@ -1352,6 +1365,7 @@ void GraphicsWindow::EditConstraint(hConstraint constraint) {
     Constraint *c = SK.GetConstraint(constraintBeingEdited);
     if(!c->HasLabel()) {
         // Not meaningful to edit a constraint without a dimension
+        dbp("Wont edit without label");
         return;
     }
     if(c->reference) {
@@ -1373,26 +1387,48 @@ void GraphicsWindow::EditConstraint(hConstraint constraint) {
         default: {
             double value = fabs(c->valA);
 
-            // If displayed as radius, also edit as radius.
-            if(c->type == Constraint::Type::DIAMETER && c->other)
-                value /= 2;
+            // True if the quantity represented by this constraint is dimensionless (ratios, angles etc.)
+            bool dimless = c->type == Constraint::Type::LENGTH_RATIO || c->type == Constraint::Type::ARC_ARC_LEN_RATIO || c->type == Constraint::Type::ARC_LINE_LEN_RATIO || c->type == Constraint::Type::ANGLE || c->type == Constraint::Type::RELATION;
 
-            // Try showing value with default number of digits after decimal first.
-            if(c->type == Constraint::Type::LENGTH_RATIO || c->type == Constraint::Type::ARC_ARC_LEN_RATIO || c->type == Constraint::Type::ARC_LINE_LEN_RATIO) {
-                editValue = ssprintf("%.3f", value);
-            } else if(c->type == Constraint::Type::ANGLE) {
-                editValue = SS.DegreeToString(value);
+            // Render a value, or render an expression
+            if(c->expression.empty()) {
+                // Try showing value with default number of digits after decimal first.
+                if(dimless) {
+                    // these ratios are dimensionless, so should not be scaled (not a length value)
+                    if(c->type == Constraint::Type::ANGLE) {
+                        editValue = SS.DegreeToString(value);
+                    } else {
+                        editValue = ssprintf("%.3f", value);
+                    }
+                } else {
+                        // If displayed as radius, also edit as radius.
+                        if(c->type == Constraint::Type::DIAMETER && c->other)
+                                value /= 2;
+
+                        editValue = SS.MmToString(value, true);
+                        value /= SS.MmPerUnit();
+                }
+
+                // If that's not enough to represent it exactly, show the value with as many
+                // digits after decimal as required, up to 10.
+                int digits = 0;
+                while(fabs(std::stod(editValue) - value) > 1e-10) {
+                    editValue = ssprintf("%.*f", digits, value);
+                    digits++;
+                }
             } else {
-                editValue = SS.MmToString(value, true);
-                value /= SS.MmPerUnit();
+                if(c->type == Constraint::Type::DIAMETER && c->other && c->expr_scaling_to_base != 0) {
+                    // Edit as radius instead of diameter due to user config
+                    editValue = ssprintf("(%s)*%f", c->expression.c_str(), c->expr_scaling_to_base/2*SS.MmPerUnit());
+                } else if(!dimless && c->expr_scaling_to_base != SS.MmPerUnit() && c->expr_scaling_to_base != 0) {
+                    // Unit needs dimension scaling
+                    editValue = ssprintf("(%s)*%f", c->expression.c_str(), c->expr_scaling_to_base/SS.MmPerUnit());
+                } else {
+                    // Unit does not need scaling
+                    editValue = c->expression;
+                }
             }
-            // If that's not enough to represent it exactly, show the value with as many
-            // digits after decimal as required, up to 10.
-            int digits = 0;
-            while(fabs(std::stod(editValue) - value) > 1e-10) {
-                editValue = ssprintf("%.*f", digits, value);
-                digits++;
-            }
+
             editPlaceholder = "10.000000";
             break;
         }
@@ -1430,11 +1466,51 @@ void GraphicsWindow::EditControlDone(const std::string &s) {
         c->comment = s;
         return;
     }
+    
+    // decided not to parse equals signs in expressions for now since
+    // 1) A relation isn't an expression since it has no meaningful reducable value
+    // 2) There can only be one occurrence of an assignment in an expression, and this may only be in a relation
+    // To enforce #2 after future changes and to to not break implicit invariant #1, we process the assignment operation as a special case
+    // Since "equations" are just expressions = 0, we just "subtract everything after the equals sign from both sides of the equation"
+    Expr *e = NULL;
+    int usedParams;
+    if(c->type == Constraint::Type::RELATION) {
+        size_t eqpos = s.find_first_of("=");
+        if(eqpos == std::string::npos || eqpos != s.find_last_of("=")) {
+            Error("Relation constraints must have exactly one '=': '%s'", s.c_str());
+            return;
+        }
+        else if(eqpos == 0) {
+            Error("Relation constraints must have a left-hand-side (\?\?%s)", s.c_str());
+            return;
+        } else if(eqpos == s.length() - 1) {
+            Error("Relation constraints must have a right-hand-side (%s\?\?)", s.c_str());
+            return;
+        } 
 
-    if(Expr *e = Expr::From(s, true)) {
+        // (left_side) - (right_side) (... implicitly = 0)
+        e = Expr::From(s.substr(0, eqpos), true, &SK.param, &usedParams)->Minus(Expr::From(s.substr(eqpos+1, SIZE_MAX), true, &SK.param, &usedParams));
+
+    } else {
+        e = Expr::From(s, true, &SK.param, &usedParams);
+    }
+
+
+    if(e) {
         SS.UndoRemember();
+        if(usedParams > 0) {
+            // after a user finishes editing an expression in a constraint that has a different scaling_to_base, we can assume that they intend for the expression to be in the currently selected units
+            c->expr_scaling_to_base = SS.MmPerUnit(); 
+            c->expression = s;
+        }
 
         switch(c->type) {
+            case Constraint::Type::RELATION:
+                // on relation, expr_scaling_to_base should be ignored, since the scaling is done on constraints that directly constrain some entity
+                c->expr_scaling_to_base = 1; 
+                c->expression = s;
+                break;
+
             case Constraint::Type::PROJ_PT_DISTANCE:
             case Constraint::Type::PT_LINE_DISTANCE:
             case Constraint::Type::PT_FACE_DISTANCE:
@@ -1442,14 +1518,15 @@ void GraphicsWindow::EditControlDone(const std::string &s) {
             case Constraint::Type::LENGTH_DIFFERENCE:
             case Constraint::Type::ARC_ARC_DIFFERENCE:
             case Constraint::Type::ARC_LINE_DIFFERENCE: {
+
                 // The sign is not displayed to the user, but this is a signed
                 // distance internally. To flip the sign, the user enters a
                 // negative distance.
                 bool wasNeg = (c->valA < 0);
                 if(wasNeg) {
-                    c->valA = -SS.ExprToMm(e);
+                    c->valA = -(e->Eval()) * c->expr_scaling_to_base;
                 } else {
-                    c->valA = SS.ExprToMm(e);
+                    c->valA = (e->Eval()) * c->expr_scaling_to_base;
                 }
                 break;
             }
@@ -1463,7 +1540,7 @@ void GraphicsWindow::EditControlDone(const std::string &s) {
                 break;
 
             case Constraint::Type::DIAMETER:
-                c->valA = fabs(SS.ExprToMm(e));
+                c->valA = fabs((e->Eval()) * c->expr_scaling_to_base);
 
                 // If displayed and edited as radius, convert back
                 // to diameter
@@ -1473,9 +1550,11 @@ void GraphicsWindow::EditControlDone(const std::string &s) {
 
             default:
                 // These are always positive, and they get the units conversion.
-                c->valA = fabs(SS.ExprToMm(e));
+                // Use ExprToMm since this unparameterized expression will simplify immediately, and the dimension transformation is irrelevant
+                c->valA = fabs(SS.NonConstraintExprToMm(e));
                 break;
         }
+        SK.GetGroup(c->group)->dofCheckOk = false; // if an named param was used in the constraint, the DoF may have changed
         SS.MarkGroupDirty(c->group);
     }
 }
